@@ -1,0 +1,1 @@
+# Bauer-Intelligence-Trading-System-3.14
