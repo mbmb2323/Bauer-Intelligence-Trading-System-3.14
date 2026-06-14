@@ -11,14 +11,12 @@ Usage
 -----
     python train.py                     # use config.yaml universe
     python train.py --tickers AAPL MSFT TSLA
-    python train.py --config my_config.yaml
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -199,10 +197,6 @@ def parse_args():
     parser.add_argument(
         "--tickers", nargs="*", default=None,
         help="Override the universe tickers (e.g. --tickers AAPL MSFT TSLA).",
-    )
-    parser.add_argument(
-        "--config", type=Path, default=None,
-        help="Path to an override config.yaml.",
     )
     return parser.parse_args()
 

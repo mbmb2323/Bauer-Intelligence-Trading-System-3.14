@@ -40,7 +40,7 @@ WORKDIR /app
 # --- Python dependencies (exclude torch — already in base image) ---
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir \
-        numpy pandas scipy \
+        numpy pandas scipy pyarrow \
         yfinance requests aiohttp \
         "pandas-ta>=0.3.14b" ta \
         lightgbm scikit-learn joblib \

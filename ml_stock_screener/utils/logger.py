@@ -15,9 +15,13 @@ from typing import Optional
 
 from ml_stock_screener.config import CFG, LOG_DIR
 
+_logging_configured: bool = False
+
 
 def setup_logging(level: Optional[str] = None) -> None:
     """Configure root logger with console + rotating file handlers."""
+    global _logging_configured
+
     log_cfg = CFG["logging"]
     level_str = level or log_cfg["level"]
     numeric_level = getattr(logging, level_str.upper(), logging.INFO)
@@ -27,8 +31,11 @@ def setup_logging(level: Optional[str] = None) -> None:
     root = logging.getLogger()
     root.setLevel(numeric_level)
 
-    # Avoid duplicate handlers if called multiple times
-    if root.handlers:
+    # If a level override is passed after initial setup, propagate it without
+    # re-adding handlers.
+    if _logging_configured:
+        for handler in root.handlers:
+            handler.setLevel(numeric_level)
         return
 
     fmt = logging.Formatter(
@@ -55,3 +62,5 @@ def setup_logging(level: Optional[str] = None) -> None:
     # Silence noisy libraries
     for noisy in ("yfinance", "urllib3", "requests", "peewee"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    _logging_configured = True

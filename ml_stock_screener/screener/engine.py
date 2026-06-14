@@ -28,7 +28,7 @@ from ml_stock_screener.config import CFG, MODELS_DIR
 from ml_stock_screener.data.fetcher import apply_volume_filter, fetch_universe
 from ml_stock_screener.data.preprocessor import build_sequences, fit_scaler, scale_features
 from ml_stock_screener.features.technical import compute_features
-from ml_stock_screener.models.ensemble import EnsembleScorer, LGBMSignalModel
+from ml_stock_screener.models.ensemble import EnsembleScorer, LGBMSignalModel, _pad_proba
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +210,8 @@ class ScreenerEngine:
         lgbm_proba: Optional[np.ndarray] = None
         if self._ensemble._lgbm is not None:
             try:
-                lgbm_proba = self._ensemble._lgbm.predict_proba(batch)
+                raw_lgbm = self._ensemble._lgbm.predict_proba(batch)
+                lgbm_proba = _pad_proba(raw_lgbm, n_classes=3)
             except Exception:
                 pass
 
@@ -219,7 +220,7 @@ class ScreenerEngine:
             signal = int(signals[i])
             m = meta.get(ticker, {})
 
-            lgbm_up = float(lgbm_proba[i, 2]) if lgbm_proba is not None and lgbm_proba.shape[1] > 2 else 0.5
+            lgbm_up = float(lgbm_proba[i, 2]) if lgbm_proba is not None else 0.0
 
             results.append(
                 ScreenerResult(

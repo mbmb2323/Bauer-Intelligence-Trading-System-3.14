@@ -88,6 +88,9 @@ class TRTEngine:
         self._output_shape: Optional[tuple] = None
         self._d_input = None
         self._d_output = None
+        self._d_input_nbytes: int = 0
+        self._d_output_nbytes: int = 0
+        self._stream = None
         self._h_output: Optional[np.ndarray] = None
 
         if _HAS_TRT:
@@ -242,25 +245,34 @@ class TRTEngine:
 
         self._context.set_input_shape(self._input_name, x.shape)
 
-        # Allocate GPU buffers if needed
+        # Compute required buffer sizes
         nbytes_in = x.nbytes
         out_shape = self._context.get_tensor_shape(self._output_name)
         out_shape = tuple(batch if d < 0 else d for d in out_shape)
         h_out = np.empty(out_shape, dtype=np.float32)
         nbytes_out = h_out.nbytes
 
-        d_in = cuda.mem_alloc(nbytes_in)
-        d_out = cuda.mem_alloc(nbytes_out)
+        # Reuse device buffers; reallocate only when the batch grows beyond
+        # the previously allocated capacity.
+        if self._d_input is None or nbytes_in > self._d_input_nbytes:
+            self._d_input = cuda.mem_alloc(nbytes_in)
+            self._d_input_nbytes = nbytes_in
+        if self._d_output is None or nbytes_out > self._d_output_nbytes:
+            self._d_output = cuda.mem_alloc(nbytes_out)
+            self._d_output_nbytes = nbytes_out
 
-        cuda.memcpy_htod(d_in, x)
-        self._context.set_tensor_address(self._input_name, int(d_in))
-        self._context.set_tensor_address(self._output_name, int(d_out))
+        # Create the CUDA stream once per engine instance
+        if self._stream is None:
+            self._stream = cuda.Stream()
 
-        stream = cuda.Stream()
-        self._context.execute_async_v3(stream_handle=stream.handle)
-        stream.synchronize()
+        cuda.memcpy_htod(self._d_input, x)
+        self._context.set_tensor_address(self._input_name, int(self._d_input))
+        self._context.set_tensor_address(self._output_name, int(self._d_output))
 
-        cuda.memcpy_dtoh(h_out, d_out)
+        self._context.execute_async_v3(stream_handle=self._stream.handle)
+        self._stream.synchronize()
+
+        cuda.memcpy_dtoh(h_out, self._d_output)
 
         # Softmax (logits -> probabilities)
         return _softmax(h_out)
@@ -275,7 +287,7 @@ class TRTEngine:
             if not onnx_path.exists():
                 raise FileNotFoundError(
                     f"ONNX model not found at {onnx_path}. "
-                    "Export the model first with `python -m ml_stock_screener.models.lstm_model`."
+                    "Export the model first with `python train.py`."
                 )
             opts = ort.SessionOptions()
             opts.intra_op_num_threads = 4

@@ -103,12 +103,24 @@ class LGBMSignalModel:
         return self._model.predict_proba(X_flat).astype(np.float32)
 
     def save(self, path: Optional[Path] = None) -> Path:
+        if not _HAS_JOBLIB:
+            raise RuntimeError(
+                "joblib is required to save the LightGBM model. "
+                "Install it with: pip install joblib"
+            )
+        if self._model is None:
+            raise RuntimeError("Model has not been trained yet; call fit() first.")
         path = path or MODELS_DIR / "lgbm_weights.pkl"
         joblib.dump(self._model, str(path))
         logger.info("LightGBM model saved to %s", path)
         return path
 
     def load(self, path: Optional[Path] = None) -> "LGBMSignalModel":
+        if not _HAS_JOBLIB:
+            raise RuntimeError(
+                "joblib is required to load the LightGBM model. "
+                "Install it with: pip install joblib"
+            )
         path = path or MODELS_DIR / "lgbm_weights.pkl"
         self._model = joblib.load(str(path))
         logger.info("LightGBM model loaded from %s", path)

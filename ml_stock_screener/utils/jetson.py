@@ -236,5 +236,6 @@ def jetson_init(power_mode: Optional[int] = None) -> None:
     if is_jetson():
         mode = power_mode if power_mode is not None else CFG["jetson"]["power_mode"]
         set_power_mode(mode)
+        set_max_clocks()
 
     configure_cuda_memory()
