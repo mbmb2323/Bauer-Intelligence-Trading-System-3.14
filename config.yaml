@@ -1,0 +1,178 @@
+# ============================================================
+# Bauer Intelligence Trading System — ML Stock Screener
+# Optimized for NVIDIA Jetson Orin Nano 8GB
+# ============================================================
+
+# --- Universe of stocks to screen ---
+universe:
+  # S&P 500 large-caps sampled for demo; expand as needed
+  tickers:
+    - AAPL
+    - MSFT
+    - GOOGL
+    - AMZN
+    - NVDA
+    - META
+    - TSLA
+    - BRK-B
+    - JPM
+    - V
+    - UNH
+    - XOM
+    - JNJ
+    - MA
+    - PG
+    - HD
+    - CVX
+    - MRK
+    - ABBV
+    - LLY
+    - AVGO
+    - PEP
+    - KO
+    - COST
+    - WMT
+    - MCD
+    - DIS
+    - CSCO
+    - ADBE
+    - CRM
+    - AMD
+    - INTC
+    - QCOM
+    - TXN
+    - NFLX
+    - PYPL
+    - BAC
+    - WFC
+    - GS
+    - MS
+  # Minimum average daily volume (shares) to qualify
+  min_avg_volume: 1_000_000
+  # Minimum market cap in USD
+  min_market_cap: 1_000_000_000
+
+# --- Data fetching ---
+data:
+  # Historical lookback period for features
+  lookback_days: 365
+  # OHLCV interval
+  interval: "1d"
+  # Number of worker threads for parallel download
+  download_workers: 8
+  # Local cache directory (relative to project root)
+  cache_dir: ".cache/market_data"
+  # Maximum cache age before refresh (hours)
+  cache_max_age_hours: 4
+
+# --- Feature engineering ---
+features:
+  # Sequence length fed into the LSTM (trading days)
+  sequence_length: 60
+  # Technical indicator parameters
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  bb_std: 2.0
+  atr_period: 14
+  adx_period: 14
+  ema_periods: [9, 21, 50, 200]
+  sma_periods: [10, 20, 50]
+  volume_ma_period: 20
+  momentum_period: 10
+  stoch_k: 14
+  stoch_d: 3
+  williams_r_period: 14
+  cci_period: 20
+
+# --- Model ---
+model:
+  # LSTM architecture
+  lstm:
+    input_size: null          # auto-computed from feature count
+    hidden_size: 128
+    num_layers: 2
+    dropout: 0.2
+    bidirectional: false
+    output_size: 3            # [DOWN, NEUTRAL, UP]
+
+  # Training hyperparameters (used during model training)
+  training:
+    epochs: 50
+    batch_size: 64
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    early_stopping_patience: 10
+    train_split: 0.7
+    val_split: 0.15
+    # test_split = 1 - train - val = 0.15
+    label_threshold: 0.02     # ±2% move defines UP/DOWN, else NEUTRAL
+    label_horizon: 5          # predict 5-day forward return
+
+  # Pretrained weights path (relative to project root); null to train fresh
+  weights_path: "models/lstm_weights.pt"
+
+  # LightGBM signal filter (technical score)
+  lgbm:
+    n_estimators: 300
+    learning_rate: 0.05
+    num_leaves: 63
+    max_depth: -1
+    min_child_samples: 20
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.1
+    reg_lambda: 0.1
+    weights_path: "models/lgbm_weights.pkl"
+
+  # Ensemble blending weights (must sum to 1.0)
+  ensemble:
+    lstm_weight: 0.6
+    lgbm_weight: 0.4
+
+# --- TensorRT (Jetson Orin Nano) ---
+tensorrt:
+  enabled: true
+  engine_path: "models/lstm_trt.engine"
+  # FP16 is native on Ampere GPU in Jetson Orin Nano
+  precision: "fp16"           # "fp32" | "fp16" | "int8"
+  # Maximum batch size to build TRT engine for
+  max_batch_size: 32
+  # Workspace size in MB
+  workspace_mb: 512
+  # Rebuild engine if model weights are newer
+  force_rebuild: false
+
+# --- Screening output ---
+screening:
+  # Number of top bullish candidates to display
+  top_n: 20
+  # Minimum composite score (0–1) to include in results
+  min_score: 0.55
+  # Signal labels
+  signal_labels:
+    2: "STRONG BUY"
+    1: "BUY"
+    0: "NEUTRAL"
+    -1: "SELL"
+    -2: "STRONG SELL"
+
+# --- Jetson hardware ---
+jetson:
+  # NVPModel index: 0=MaxN, 1=10W, 2=15W, 3=20W
+  power_mode: 0               # 0 = MAXN (full performance)
+  # GPU memory fraction to use (0.0–1.0) — 8GB unified
+  gpu_memory_fraction: 0.75
+  # Enable CUDA graphs for faster repeated inference
+  use_cuda_graphs: true
+  # Pin CPU memory for faster DMA transfers
+  pin_memory: true
+
+# --- Logging ---
+logging:
+  level: "INFO"               # DEBUG | INFO | WARNING | ERROR
+  log_file: "logs/screener.log"
+  max_bytes: 10_485_760       # 10 MB
+  backup_count: 5
