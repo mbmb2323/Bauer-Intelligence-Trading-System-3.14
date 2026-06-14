@@ -95,9 +95,12 @@ def build_combined_dataset(tickers: Optional[List[str]] = None):
                 continue
 
             train, val, test = chronological_split(X, y)
-            all_X_train.append(train[0]); all_y_train.append(train[1])
-            all_X_val.append(val[0]);     all_y_val.append(val[1])
-            all_X_test.append(test[0]);   all_y_test.append(test[1])
+            all_X_train.append(train[0])
+            all_y_train.append(train[1])
+            all_X_val.append(val[0])
+            all_y_val.append(val[1])
+            all_X_test.append(test[0])
+            all_y_test.append(test[1])
 
         except Exception as exc:
             logger.warning("Skipping %s: %s", ticker, exc)

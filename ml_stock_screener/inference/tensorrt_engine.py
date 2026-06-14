@@ -237,8 +237,6 @@ class TRTEngine:
         if not _HAS_TRT or self._engine is None:
             return self._ort_infer(x)
 
-        import pycuda.driver as cuda  # noqa: F811 (re-import for scope)
-
         x = x.astype(np.float32)
         batch = x.shape[0]
 

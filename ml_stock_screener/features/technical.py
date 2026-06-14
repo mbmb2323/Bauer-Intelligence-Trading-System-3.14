@@ -51,80 +51,80 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     fc = CFG["features"]
     feat = pd.DataFrame(index=df.index)
 
-    o = df["open"]
-    h = df["high"]
-    l = df["low"]
-    c = df["close"]
-    v = df["volume"]
+    open_prices = df["open"]
+    high_prices = df["high"]
+    low_prices  = df["low"]
+    close_prices = df["close"]
+    volumes = df["volume"]
 
     # ------------------------------------------------------------------
     # Price-based raw features
     # ------------------------------------------------------------------
-    feat["log_return"] = np.log(c / c.shift(1))
-    feat["hl_range"] = (h - l) / c
-    feat["oc_change"] = (c - o) / o
+    feat["log_return"] = np.log(close_prices / close_prices.shift(1))
+    feat["hl_range"] = (high_prices - low_prices) / close_prices
+    feat["oc_change"] = (close_prices - open_prices) / open_prices
 
     # ------------------------------------------------------------------
     # Moving averages & crossovers
     # ------------------------------------------------------------------
     for period in fc["ema_periods"]:
         col = f"ema_{period}"
-        feat[col] = c.ewm(span=period, adjust=False).mean() / c - 1.0
+        feat[col] = close_prices.ewm(span=period, adjust=False).mean() / close_prices - 1.0
 
     for period in fc["sma_periods"]:
         col = f"sma_{period}"
-        feat[col] = c.rolling(period).mean() / c - 1.0
+        feat[col] = close_prices.rolling(period).mean() / close_prices - 1.0
 
     # ------------------------------------------------------------------
     # RSI
     # ------------------------------------------------------------------
-    feat["rsi"] = _rsi(c, fc["rsi_period"]) / 100.0
+    feat["rsi"] = _rsi(close_prices, fc["rsi_period"]) / 100.0
 
     # ------------------------------------------------------------------
     # MACD
     # ------------------------------------------------------------------
     macd_line, macd_signal, macd_hist = _macd(
-        c, fc["macd_fast"], fc["macd_slow"], fc["macd_signal"]
+        close_prices, fc["macd_fast"], fc["macd_slow"], fc["macd_signal"]
     )
-    feat["macd"] = macd_line / c
-    feat["macd_signal"] = macd_signal / c
-    feat["macd_hist"] = macd_hist / c
+    feat["macd"] = macd_line / close_prices
+    feat["macd_signal"] = macd_signal / close_prices
+    feat["macd_hist"] = macd_hist / close_prices
 
     # ------------------------------------------------------------------
     # Bollinger Bands
     # ------------------------------------------------------------------
-    bb_mid = c.rolling(fc["bb_period"]).mean()
-    bb_std = c.rolling(fc["bb_period"]).std()
-    feat["bb_upper_dist"] = (bb_mid + fc["bb_std"] * bb_std - c) / c
-    feat["bb_lower_dist"] = (c - (bb_mid - fc["bb_std"] * bb_std)) / c
+    bb_mid = close_prices.rolling(fc["bb_period"]).mean()
+    bb_std = close_prices.rolling(fc["bb_period"]).std()
+    feat["bb_upper_dist"] = (bb_mid + fc["bb_std"] * bb_std - close_prices) / close_prices
+    feat["bb_lower_dist"] = (close_prices - (bb_mid - fc["bb_std"] * bb_std)) / close_prices
     feat["bb_width"] = (2 * fc["bb_std"] * bb_std) / bb_mid
 
     # ------------------------------------------------------------------
     # ATR (Average True Range) — normalised by close
     # ------------------------------------------------------------------
-    feat["atr"] = _atr(h, l, c, fc["atr_period"]) / c
+    feat["atr"] = _atr(high_prices, low_prices, close_prices, fc["atr_period"]) / close_prices
 
     # ------------------------------------------------------------------
     # Stochastic %K / %D
     # ------------------------------------------------------------------
-    stoch_k, stoch_d = _stochastic(h, l, c, fc["stoch_k"], fc["stoch_d"])
+    stoch_k, stoch_d = _stochastic(high_prices, low_prices, close_prices, fc["stoch_k"], fc["stoch_d"])
     feat["stoch_k"] = stoch_k / 100.0
     feat["stoch_d"] = stoch_d / 100.0
 
     # ------------------------------------------------------------------
     # Williams %R
     # ------------------------------------------------------------------
-    feat["williams_r"] = _williams_r(h, l, c, fc["williams_r_period"]) / -100.0
+    feat["williams_r"] = _williams_r(high_prices, low_prices, close_prices, fc["williams_r_period"]) / -100.0
 
     # ------------------------------------------------------------------
     # CCI
     # ------------------------------------------------------------------
-    feat["cci"] = _cci(h, l, c, fc["cci_period"]) / 200.0  # rough normalisation
+    feat["cci"] = _cci(high_prices, low_prices, close_prices, fc["cci_period"]) / 200.0  # rough normalisation
 
     # ------------------------------------------------------------------
     # ADX / DI
     # ------------------------------------------------------------------
-    adx, plus_di, minus_di = _adx(h, l, c, fc["adx_period"])
+    adx, plus_di, minus_di = _adx(high_prices, low_prices, close_prices, fc["adx_period"])
     feat["adx"] = adx / 100.0
     feat["plus_di"] = plus_di / 100.0
     feat["minus_di"] = minus_di / 100.0
@@ -133,17 +133,17 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     # ------------------------------------------------------------------
     # Momentum
     # ------------------------------------------------------------------
-    feat["momentum"] = c / c.shift(fc["momentum_period"]) - 1.0
+    feat["momentum"] = close_prices / close_prices.shift(fc["momentum_period"]) - 1.0
 
     # ------------------------------------------------------------------
     # Volume features
     # ------------------------------------------------------------------
-    vol_ma = v.rolling(fc["volume_ma_period"]).mean()
-    feat["vol_ratio"] = v / vol_ma
-    feat["log_volume"] = np.log1p(v) - np.log1p(vol_ma)
+    vol_ma = volumes.rolling(fc["volume_ma_period"]).mean()
+    feat["vol_ratio"] = volumes / vol_ma
+    feat["log_volume"] = np.log1p(volumes) - np.log1p(vol_ma)
 
     # On-Balance Volume change rate
-    obv = _obv(c, v)
+    obv = _obv(close_prices, volumes)
     feat["obv_change"] = obv.pct_change(5)
 
     # ------------------------------------------------------------------
@@ -169,22 +169,22 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def _add_pandas_ta_extras(df: pd.DataFrame, feat: pd.DataFrame) -> None:
     """Append extra indicators available via pandas_ta."""
-    c = df["close"]
-    h = df["high"]
-    l = df["low"]
-    v = df["volume"]
+    close_prices = df["close"]
+    high_prices = df["high"]
+    low_prices = df["low"]
+    volumes = df["volume"]
 
     # VWAP (session-level; approximated on daily data)
     try:
-        vwap = ta.vwap(h, l, c, v)
+        vwap = ta.vwap(high_prices, low_prices, close_prices, volumes)
         if vwap is not None and not vwap.empty:
-            feat["vwap_dist"] = (c / vwap - 1.0).reindex(feat.index)
+            feat["vwap_dist"] = (close_prices / vwap - 1.0).reindex(feat.index)
     except Exception:
         pass
 
     # PPO (Percentage Price Oscillator)
     try:
-        ppo = ta.ppo(c)
+        ppo = ta.ppo(close_prices)
         if ppo is not None and not ppo.empty:
             col = [x for x in ppo.columns if "PPO_" in x]
             if col:
@@ -194,7 +194,7 @@ def _add_pandas_ta_extras(df: pd.DataFrame, feat: pd.DataFrame) -> None:
 
     # MFI (Money Flow Index)
     try:
-        mfi = ta.mfi(h, l, c, v)
+        mfi = ta.mfi(high_prices, low_prices, close_prices, volumes)
         if mfi is not None and not mfi.empty:
             feat["mfi"] = (mfi / 100.0).reindex(feat.index)
     except Exception:
