@@ -28,7 +28,7 @@ from ml_stock_screener.config import CFG, MODELS_DIR
 from ml_stock_screener.data.fetcher import apply_volume_filter, fetch_universe
 from ml_stock_screener.data.preprocessor import build_sequences, fit_scaler, scale_features
 from ml_stock_screener.features.technical import compute_features
-from ml_stock_screener.models.ensemble import EnsembleScorer, LGBMSignalModel, _pad_proba
+from ml_stock_screener.models.ensemble import EnsembleScorer, LGBMSignalModel
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,13 @@ class ScreenerEngine:
     ) -> None:
         self._ensemble = EnsembleScorer(lstm_inference_fn, lgbm_model)
         self._seq_len: int = CFG["features"]["sequence_length"]
-        self._inference_batch_size: int = max(1, int(CFG["tensorrt"]["max_batch_size"]))
+        batch_size = int(CFG["tensorrt"]["max_batch_size"])
+        if batch_size <= 0:
+            raise ValueError(
+                f"Invalid tensorrt.max_batch_size={batch_size}. "
+                "Expected a positive integer."
+            )
+        self._inference_batch_size = batch_size
         self._signal_labels: Dict[int, str] = {
             int(k): v for k, v in CFG["screening"]["signal_labels"].items()
         }
@@ -201,7 +207,6 @@ class ScreenerEngine:
         tickers = list(windows.keys())
         batch_size = self._inference_batch_size
 
-        score_parts: List[np.ndarray] = []
         lstm_parts: List[np.ndarray] = []
         lgbm_parts: List[np.ndarray] = []
         lgbm_failed = False
@@ -210,23 +215,31 @@ class ScreenerEngine:
             chunk_tickers = tickers[start : start + batch_size]
             batch = np.concatenate([windows[t] for t in chunk_tickers], axis=0)
 
-            score_parts.append(self._ensemble.score(batch))
-            lstm_parts.append(self._ensemble._lstm_fn(batch))
+            lstm_parts.append(self._ensemble.run_lstm(batch))
 
-            if self._ensemble._lgbm is not None and not lgbm_failed:
+            if self._ensemble.has_lgbm() and not lgbm_failed:
                 try:
-                    raw_lgbm = self._ensemble._lgbm.predict_proba(batch)
-                    lgbm_parts.append(_pad_proba(raw_lgbm, n_classes=3))
-                except Exception:
+                    chunk_lgbm = self._ensemble.run_lgbm(batch)
+                    if chunk_lgbm is not None:
+                        lgbm_parts.append(chunk_lgbm)
+                except Exception as exc:
+                    logger.warning(
+                        "LightGBM inference failed for batch starting at %d (%s); "
+                        "falling back to LSTM-only scoring for all tickers.",
+                        start,
+                        exc,
+                    )
                     lgbm_failed = True
                     lgbm_parts = []
 
-        scores = np.concatenate(score_parts, axis=0)
-        signals = self._ensemble.classify(scores)
         lstm_proba = np.concatenate(lstm_parts, axis=0)
         lgbm_proba: Optional[np.ndarray] = (
             np.concatenate(lgbm_parts, axis=0) if lgbm_parts else None
         )
+
+        combined = self._ensemble.combine_probabilities(lstm_proba, lgbm_proba)
+        scores = self._ensemble.bull_scores(combined)
+        signals = self._ensemble.classify(scores)
 
         results: List[ScreenerResult] = []
         for i, ticker in enumerate(tickers):
