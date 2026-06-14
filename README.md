@@ -11,7 +11,7 @@ LPDDR5 memory pool for seamless CPU↔GPU data transfer.
 ## Architecture
 
 ```
-Universe (40+ S&P 500 tickers)
+Universe (40+ default S&P 500 tickers, scalable to 10,000)
         │
         ▼
 ┌───────────────────┐
