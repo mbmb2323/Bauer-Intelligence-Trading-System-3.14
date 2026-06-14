@@ -283,7 +283,11 @@ class TRTEngine:
             raise RuntimeError("Neither TensorRT nor ONNX Runtime is available.")
         # Lazy-load ORT session
         if not hasattr(self, "_ort_session"):
-            onnx_path = MODELS_DIR / "lstm.onnx"
+            # Use self._path if it points to an ONNX file; otherwise fall back to default
+            if self._path is not None and str(self._path).endswith(".onnx"):
+                onnx_path = self._path
+            else:
+                onnx_path = MODELS_DIR / "lstm.onnx"
             if not onnx_path.exists():
                 raise FileNotFoundError(
                     f"ONNX model not found at {onnx_path}. "
