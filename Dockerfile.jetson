@@ -1,0 +1,61 @@
+# ============================================================
+# Bauer Intelligence Trading System — Jetson Orin Nano 8GB
+# Docker image based on NVIDIA L4T JetPack 6.x
+# ============================================================
+#
+# Build on Jetson:
+#   docker build -f Dockerfile.jetson -t bauer-screener:latest .
+#
+# Run:
+#   docker run --rm --runtime=nvidia \
+#     -v $(pwd)/models:/app/models \
+#     -v $(pwd)/.cache:/app/.cache \
+#     bauer-screener:latest python main.py
+#
+# ============================================================
+
+FROM nvcr.io/nvidia/l4t-pytorch:r36.2.0-pth2.1-py3
+
+LABEL maintainer="Bauer Intelligence"
+LABEL description="ML Stock Screener — Jetson Orin Nano 8GB"
+
+# --- System dependencies ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3-pip \
+        python3-dev \
+        python3-numpy \
+        libopenblas-dev \
+        liblapack-dev \
+        git \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# TensorRT Python bindings are pre-installed in the L4T PyTorch base image.
+# We symlink them so pip can find them as ordinary packages.
+RUN python3 -c "import tensorrt; print('TRT', tensorrt.__version__)" \
+    || echo "TRT not pre-installed — install JetPack TRT packages."
+
+WORKDIR /app
+
+# --- Python dependencies (exclude torch — already in base image) ---
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir \
+        numpy pandas scipy \
+        yfinance requests aiohttp \
+        "pandas-ta>=0.3.14b" ta \
+        lightgbm scikit-learn joblib \
+        onnx onnxruntime \
+        rich tabulate \
+        pyyaml python-dotenv \
+        tqdm click coloredlogs \
+    && pip3 install --no-cache-dir pycuda \
+    && rm -rf /root/.cache/pip
+
+# --- Copy project ---
+COPY . .
+
+# --- Create runtime directories ---
+RUN mkdir -p .cache/market_data models logs
+
+# --- Default command: run the screener ---
+CMD ["python3", "main.py"]
