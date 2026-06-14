@@ -4,8 +4,25 @@ import sys
 import types
 
 import numpy as np
+import pytest
 
 FEATURE_COUNT = 8
+
+
+def test_engine_rejects_nonpositive_batch_size(monkeypatch):
+    from ml_stock_screener.config import CFG
+
+    monkeypatch.setitem(
+        sys.modules,
+        "yfinance",
+        types.SimpleNamespace(download=lambda *args, **kwargs: None),
+    )
+    from ml_stock_screener.screener.engine import ScreenerEngine
+
+    for bad_size in (0, -1, -100):
+        monkeypatch.setitem(CFG["tensorrt"], "max_batch_size", bad_size)
+        with pytest.raises(ValueError, match="max_batch_size"):
+            ScreenerEngine(lstm_inference_fn=lambda x: x, lgbm_model=None)
 
 
 def test_run_inference_chunks_large_universe(monkeypatch):
@@ -99,6 +116,21 @@ def test_run_inference_falls_back_when_lgbm_fails(monkeypatch):
     assert len(results) == n_tickers
     assert lgbm.calls >= 2
 
-    # After fallback, scoring should be LSTM-only:
+    # The first batch (16 tickers) had a successful LGBM call → ensemble scoring.
+    # score = lstm_w * P_lstm(up) + lgbm_w * P_lgbm(up)
+    #       + 0.5 * (lstm_w * P_lstm(neutral) + lgbm_w * P_lgbm(neutral))
+    #       = 0.6 * 0.8 + 0.4 * 0.7 + 0.5 * (0.6 * 0.15 + 0.4 * 0.2)
+    #       = 0.76 + 0.5 * 0.17 = 0.845
+    expected_combined = 0.6 * 0.8 + 0.4 * 0.7 + 0.5 * (0.6 * 0.15 + 0.4 * 0.2)
+    # The second batch onward had no LGBM (failure) → LSTM-only scoring.
     # score = P(up) + 0.5 * P(neutral) = 0.8 + 0.5 * 0.15 = 0.875
-    assert all(abs(r.score - 0.875) < 1e-6 for r in results)
+    expected_lstm_only = 0.8 + 0.5 * 0.15
+    for i, r in enumerate(results):
+        if i < 16:
+            assert abs(r.score - expected_combined) < 1e-4, (
+                f"Ticker {i}: expected combined score {expected_combined:.4f}, got {r.score}"
+            )
+        else:
+            assert abs(r.score - expected_lstm_only) < 1e-4, (
+                f"Ticker {i}: expected LSTM-only score {expected_lstm_only:.4f}, got {r.score}"
+            )

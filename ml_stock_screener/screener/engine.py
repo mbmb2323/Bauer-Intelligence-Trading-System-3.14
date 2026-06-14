@@ -24,7 +24,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from ml_stock_screener.config import CFG, MODELS_DIR
+from ml_stock_screener.config import CFG
 from ml_stock_screener.data.fetcher import apply_volume_filter, fetch_universe
 from ml_stock_screener.data.preprocessor import build_sequences, fit_scaler, scale_features
 from ml_stock_screener.features.technical import compute_features
@@ -210,6 +210,7 @@ class ScreenerEngine:
         lstm_parts: List[np.ndarray] = []
         lgbm_parts: List[np.ndarray] = []
         lgbm_failed = False
+        lgbm_covered = 0  # number of tickers with successful LightGBM probabilities
 
         for start in range(0, len(tickers), batch_size):
             chunk_tickers = tickers[start : start + batch_size]
@@ -222,22 +223,35 @@ class ScreenerEngine:
                     chunk_lgbm = self._ensemble.run_lgbm(batch)
                     if chunk_lgbm is not None:
                         lgbm_parts.append(chunk_lgbm)
-                except Exception as exc:
-                    logger.warning(
-                        "LightGBM inference failed for batch starting at %d (%s); "
-                        "falling back to LSTM-only scoring for all tickers.",
+                        lgbm_covered += len(chunk_tickers)
+                except Exception:
+                    logger.exception(
+                        "LightGBM inference failed for batch starting at %d; "
+                        "falling back to LSTM-only scoring for remaining tickers.",
                         start,
-                        exc,
                     )
                     lgbm_failed = True
-                    lgbm_parts = []
 
         lstm_proba = np.concatenate(lstm_parts, axis=0)
-        lgbm_proba: Optional[np.ndarray] = (
-            np.concatenate(lgbm_parts, axis=0) if lgbm_parts else None
-        )
 
-        combined = self._ensemble.combine_probabilities(lstm_proba, lgbm_proba)
+        # Preserve partial LGBM results: use ensemble scores where available and
+        # LSTM-only scores for the tail that failed or was never attempted.
+        if lgbm_parts:
+            lgbm_partial: Optional[np.ndarray] = np.concatenate(lgbm_parts, axis=0)
+            combined_head = self._ensemble.combine_probabilities(
+                lstm_proba[:lgbm_covered], lgbm_partial
+            )
+            if lgbm_covered < len(tickers):
+                combined_tail = self._ensemble.combine_probabilities(
+                    lstm_proba[lgbm_covered:]
+                )
+                combined = np.concatenate([combined_head, combined_tail], axis=0)
+            else:
+                combined = combined_head
+        else:
+            lgbm_partial = None
+            combined = self._ensemble.combine_probabilities(lstm_proba)
+
         scores = self._ensemble.bull_scores(combined)
         signals = self._ensemble.classify(scores)
 
@@ -246,7 +260,11 @@ class ScreenerEngine:
             signal = int(signals[i])
             m = meta.get(ticker, {})
 
-            lgbm_up = float(lgbm_proba[i, 2]) if lgbm_proba is not None else 0.0
+            lgbm_up = (
+                float(lgbm_partial[i, 2])
+                if lgbm_partial is not None and i < lgbm_covered
+                else 0.0
+            )
 
             results.append(
                 ScreenerResult(
