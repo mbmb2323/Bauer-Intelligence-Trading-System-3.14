@@ -176,19 +176,40 @@ class EnsembleScorer:
         -------
         scores : shape (N,)  values in [0, 1]  — higher = more bullish
         """
-        lstm_proba = self._lstm_fn(X)   # (N, 3)
+        lstm_proba = self.run_lstm(X)   # (N, 3)
+        lgbm_proba = self.run_lgbm(X)
+        combined = self.combine_probabilities(lstm_proba, lgbm_proba)
+        return self.bull_scores(combined)
 
+    def run_lstm(self, X: np.ndarray) -> np.ndarray:
+        """Return LSTM class probabilities for batch X."""
+        return self._lstm_fn(X)
+
+    def run_lgbm(self, X: np.ndarray) -> Optional[np.ndarray]:
+        """Return LightGBM class probabilities for batch X when available."""
         if self._lgbm is not None and _HAS_LGB:
-            lgbm_proba = self._lgbm.predict_proba(X)  # (N, 3)
-            # Align class count (LGBM may have fewer classes if some absent in training)
-            lgbm_proba = _pad_proba(lgbm_proba, n_classes=3)
-            combined = self._lstm_w * lstm_proba + self._lgbm_w * lgbm_proba
-        else:
-            combined = lstm_proba
+            raw = self._lgbm.predict_proba(X)
+            return _pad_proba(raw, n_classes=3)
+        return None
 
-        # Bull score = P(UP) + 0.5 * P(NEUTRAL)
-        up_prob = combined[:, 2]
-        neutral_prob = combined[:, 1]
+    def has_lgbm(self) -> bool:
+        """Return True when a LightGBM model is available for inference."""
+        return self._lgbm is not None and _HAS_LGB
+
+    def combine_probabilities(
+        self,
+        lstm_proba: np.ndarray,
+        lgbm_proba: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Blend model probabilities using configured ensemble weights."""
+        if lgbm_proba is not None:
+            return self._lstm_w * lstm_proba + self._lgbm_w * lgbm_proba
+        return lstm_proba
+
+    def bull_scores(self, proba: np.ndarray) -> np.ndarray:
+        """Convert class probabilities to bullish scores."""
+        up_prob = proba[:, 2]
+        neutral_prob = proba[:, 1]
         return (up_prob + 0.5 * neutral_prob).astype(np.float32)
 
     def classify(self, scores: np.ndarray) -> np.ndarray:

@@ -5,7 +5,7 @@
 
 # --- Universe of stocks to screen ---
 universe:
-  # S&P 500 large-caps sampled for demo; expand as needed
+  # S&P 500 large-caps sampled for demo; engine supports up to 10,000 tickers
   tickers:
     - AAPL
     - MSFT
